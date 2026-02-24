@@ -39,7 +39,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 load_dotenv()
 
-app = Flask(__name__, template_folder="./", static_url_path="")
+app = Flask(__name__, template_folder="./", static_url_path="/assets", static_folder="assets")
 app.secret_key = os.getenv("SECRET_KEY", os.urandom(24).hex())
 
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
