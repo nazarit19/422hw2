@@ -24,21 +24,24 @@ SOFTWARE.
 
 #!flask/bin/python
 from flask import Flask, jsonify, abort, request, make_response, url_for
-from flask import render_template, redirect
+from flask import render_template, redirect, session, flash
 import os
+import io
 import boto3    
 import time
 import datetime
 from boto3.dynamodb.conditions import Key, Attr
 import exifread
 import json
+import uuid
 from dotenv import load_dotenv
+from werkzeug.security import generate_password_hash, check_password_hash
 
 load_dotenv()
 
 app = Flask(__name__, template_folder="./", static_url_path="")
+app.secret_key = os.getenv("SECRET_KEY", os.urandom(24).hex())
 
-UPLOAD_FOLDER = os.path.join(app.root_path,'media')
 ALLOWED_EXTENSIONS = set(['png', 'jpg', 'jpeg'])
 AWS_ACCESS_KEY=os.getenv("AWS_KEY")
 AWS_SECRET_KEY=os.getenv("AWS_SECRET")
@@ -50,6 +53,7 @@ dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
                             region_name=REGION)
 
 table = dynamodb.Table('PhotoGallery')
+users_table = dynamodb.Table('PhotoGalleryUsers')
 
 
 def allowed_file(filename):
@@ -65,9 +69,9 @@ def bad_request(error):
 def not_found(error):
     return make_response(jsonify({'error': 'Not found'}), 404)
 
-def getExifData(path_name):
-    f = open(path_name, 'rb')
-    tags = exifread.process_file(f)
+def getExifData(file_stream):
+    file_stream.seek(0)
+    tags = exifread.process_file(file_stream)
     ExifData={}
     for tag in tags.keys():
         if tag not in ('JPEGThumbnail', 
@@ -79,14 +83,15 @@ def getExifData(path_name):
             ExifData[key]=val
     return ExifData
 
-def s3uploading(filename, filenameWithPath):
+def s3uploading(filename, file_stream):
     s3 = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY,
                             aws_secret_access_key=AWS_SECRET_KEY)
                        
     bucket = BUCKET_NAME
     path_filename = "photos/" + filename
     print(path_filename)
-    s3.upload_file(filenameWithPath, bucket, path_filename)  
+    file_stream.seek(0)
+    s3.upload_fileobj(file_stream, bucket, path_filename)  
     s3.put_object_acl(ACL='public-read', 
                 Bucket=bucket, Key=path_filename)
     return "http://"+BUCKET_NAME+\
@@ -94,15 +99,69 @@ def s3uploading(filename, filenameWithPath):
 
 @app.route('/', methods=['GET', 'POST'])
 def home_page():
-    response = table.scan()
+    # Get all public photos
+    public_response = table.scan(
+        FilterExpression=Attr('Public').eq('yes')
+    )
+    items = public_response['Items']
 
-    items = response['Items']
+    # If logged in, also get user's private photos
+    if 'username' in session:
+        user_response = table.query(
+            KeyConditionExpression=Key('UserID').eq(session['username'])
+        )
+        # Add user's private photos (avoid duplicates with public ones)
+        public_ids = {item['PhotoID'] for item in items}
+        for item in user_response['Items']:
+            if item['PhotoID'] not in public_ids:
+                items.append(item)
+
     print(items)
+    return render_template('index.html', photos=items,
+                           username=session.get('username'))
 
-    return render_template('index.html', photos=items)
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        # Check if user already exists
+        response = users_table.get_item(Key={'Email': email})
+        if 'Item' in response:
+            flash('An account with this email already exists')
+            return redirect('/register')
+        users_table.put_item(Item={
+            'Email': email,
+            'PasswordHash': generate_password_hash(password)
+        })
+        session['username'] = email
+        return redirect('/')
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        response = users_table.get_item(Key={'Email': email})
+        if 'Item' not in response or not check_password_hash(
+                response['Item']['PasswordHash'], password):
+            flash('Invalid email or password')
+            return redirect('/login')
+        session['username'] = email
+        return redirect('/')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    return redirect('/')
 
 @app.route('/add', methods=['GET', 'POST'])
 def add_photo():
+    if 'username' not in session:
+        flash('Please log in to upload photos')
+        return redirect('/login')
     if request.method == 'POST':    
         uploadedFileURL=''
 
@@ -110,17 +169,13 @@ def add_photo():
         title = request.form['title']
         tags = request.form['tags']
         description = request.form['description']
+        public = 'yes' if request.form.get('public') else 'no'
 
         print(title,tags,description)
         if file and allowed_file(file.filename):
             filename = file.filename
-            filenameWithPath = os.path.join(UPLOAD_FOLDER, 
-                                        filename)
-            print(filenameWithPath)
-            file.save(filenameWithPath)
-            uploadedFileURL = s3uploading(filename, 
-                                        filenameWithPath);
-            ExifData=getExifData(filenameWithPath)
+            ExifData=getExifData(file)
+            uploadedFileURL = s3uploading(filename, file)
             ts=time.time()
             timestamp = datetime.datetime.\
                         fromtimestamp(ts).\
@@ -128,13 +183,14 @@ def add_photo():
 
             table.put_item(
             Item={
-                    "UserID": "Oscar",
+                    "UserID": session['username'],
                     "PhotoID": str(int(ts*1000)),
                     "CreationTime": timestamp,
                     "Title": title,
                     "Description": description,
                     "Tags": tags,
                     "URL": uploadedFileURL,
+                    "Public": public,
                     "ExifData": json.dumps(ExifData)
                 }
             )
