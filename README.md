@@ -13,7 +13,9 @@ to run:
 * python-dotenv
 * exifread
 
-3. run the app:
+3. create .env file in photogallery with AWS_KEY, AWS_SECRET, and the BUCKET_NAME environment variables
+
+4. run the app:
 - flask run
 
-4. to upload images, they need to be in the photogallery/media/ folder
+5. to upload images, they need to be in the photogallery/media/ folder
