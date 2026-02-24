@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
-<title>Photo Gallery</title>
+<title>My Photos - Photo Gallery</title>
 <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <link href='https://fonts.googleapis.com/css?family=Roboto:100,400,700,500,300,300italic' rel='stylesheet' type='text/css'>
 <link href='https://fonts.googleapis.com/css?family=Droid+Serif:400,400italic,700,700italic' rel='stylesheet' type='text/css'>
@@ -19,25 +19,11 @@
 <div class="wrapper">
     <div class="bg-color-sky-light">
     <br>
-    <center><h2>Photo Gallery</h2>
+    <center><h2>My Photos</h2>
     <br>
     <a href="/">Home</a> |
-    {% if username %}
-        <a href="/myphotos">My Photos</a> | <a href="/add">Add Photo</a> | Logged in as <strong>{{ username }}</strong> | <a href="/logout">Logout</a>
-    {% else %}
-        <a href="/login">Login</a> | <a href="/register">Register</a>
-    {% endif %}
+    <a href="/myphotos">My Photos</a> | <a href="/add">Add Photo</a> | Logged in as <strong>{{ username }}</strong> | <a href="/logout">Logout</a>
     <br><br>
-<div class="container">
-            <div class="row">
-                <div class="col-md-12">
-                        <div class="blog-grid-content">
-<form  method='get' action="/search">
-                            <input type="text" name="query" id="query" class="form-control" placeholder="Search photos">
-                        </div>
-                </div>
-            </div>
-        </div>
     </center>
         <div class="content-sm container">
             <div class="theme-portfolio">
@@ -57,6 +43,11 @@
                         <div class="theme-portfolio-title-heading">
                             <h4 class="theme-portfolio-title"><a href="/{{p.PhotoID}}">{{p.Title}}</a></h4>
                             <span class="theme-portfolio-subtitle">{{p.CreationTime}}</span>
+                            {% if p.Public == 'yes' %}
+                            <span class="label label-success">Public</span>
+                            {% else %}
+                            <span class="label label-default">Private</span>
+                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}

@@ -105,19 +105,20 @@ def home_page():
     )
     items = public_response['Items']
 
-    # If logged in, also get user's private photos
-    if 'username' in session:
-        user_response = table.query(
-            KeyConditionExpression=Key('UserID').eq(session['username'])
-        )
-        # Add user's private photos (avoid duplicates with public ones)
-        public_ids = {item['PhotoID'] for item in items}
-        for item in user_response['Items']:
-            if item['PhotoID'] not in public_ids:
-                items.append(item)
-
     print(items)
     return render_template('index.html', photos=items,
+                           username=session.get('username'))
+
+@app.route('/myphotos', methods=['GET'])
+def my_photos():
+    if 'username' not in session:
+        flash('Please log in to view your photos')
+        return redirect('/login')
+    response = table.query(
+        KeyConditionExpression=Key('UserID').eq(session['username'])
+    )
+    items = response['Items']
+    return render_template('myphotos.html', photos=items,
                            username=session.get('username'))
 
 @app.route('/register', methods=['GET', 'POST'])
