@@ -32,6 +32,9 @@ import datetime
 from boto3.dynamodb.conditions import Key, Attr
 import exifread
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__, template_folder="./", static_url_path="")
 
