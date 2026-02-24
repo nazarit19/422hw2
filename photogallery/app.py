@@ -219,13 +219,32 @@ def search_page():
     query = request.args.get('query', None)    
     
     response = table.scan(
-        FilterExpression=Attr('Title').contains(str(query)) | 
-                        Attr('Description').contains(str(query)) | 
-                        Attr('Tags').contains(str(query))
+        FilterExpression=Attr('Public').eq('yes')
     )
-    items = response['Items']
+    q = str(query).lower()
+    items = [item for item in response['Items']
+             if q in item.get('Title', '').lower()
+             or q in item.get('Description', '').lower()
+             or q in item.get('Tags', '').lower()]
     return render_template('search.html', 
             photos=items, searchquery=query)
+
+@app.route('/mysearch', methods=['GET'])
+def my_search_page():
+    if 'username' not in session:
+        return redirect('/login')
+    query = request.args.get('query', None)
+    
+    response = table.query(
+        KeyConditionExpression=Key('UserID').eq(session['username'])
+    )
+    q = str(query).lower()
+    items = [item for item in response['Items']
+             if q in item.get('Title', '').lower()
+             or q in item.get('Description', '').lower()
+             or q in item.get('Tags', '').lower()]
+    return render_template('myphotos.html', photos=items,
+                           username=session.get('username'))
 
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=5001)
