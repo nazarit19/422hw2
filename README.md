@@ -1,4 +1,4 @@
-# 422hw2
+# 422project2 **
 
 
 to run: 
