@@ -30,12 +30,14 @@ import io
 import boto3    
 import time
 import datetime
-from boto3.dynamodb.conditions import Key, Attr
 import exifread
 import json
 import uuid
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash, check_password_hash
+
+from pymongo import MongoClient
+
 
 load_dotenv()
 
@@ -48,12 +50,10 @@ AWS_SECRET_KEY=os.getenv("AWS_SECRET")
 REGION="us-east-2"
 BUCKET_NAME=os.getenv("BUCKET_NAME")
 
-dynamodb = boto3.resource('dynamodb', aws_access_key_id=AWS_ACCESS_KEY,
-                            aws_secret_access_key=AWS_SECRET_KEY,
-                            region_name=REGION)
-
-table = dynamodb.Table('PhotoGallery')
-users_table = dynamodb.Table('PhotoGalleryUsers')
+mongo_client = MongoClient(os.getenv("MONGODB_URI"))  # e.g. "mongodb://localhost:27017"
+db = mongo_client[os.getenv("MONGO_DB_NAME")]
+photos_col = db[os.getenv("MONGO_PHOTOS_COLLECTION")]
+users_col = db[os.getenv("MONGO_USERS_COLLECTION")]
 
 
 def allowed_file(filename):
@@ -100,10 +100,7 @@ def s3uploading(filename, file_stream):
 @app.route('/', methods=['GET', 'POST'])
 def home_page():
     # Get all public photos
-    public_response = table.scan(
-        FilterExpression=Attr('Public').eq('yes')
-    )
-    items = public_response['Items']
+    items = list(photos_col.find({"Public": "yes"}, {"_id": 0}))
 
     print(items)
     return render_template('index.html', photos=items,
@@ -114,10 +111,7 @@ def my_photos():
     if 'username' not in session:
         flash('Please log in to view your photos')
         return redirect('/login')
-    response = table.query(
-        KeyConditionExpression=Key('UserID').eq(session['username'])
-    )
-    items = response['Items']
+    items = list(photos_col.find({"UserID": session['username']}, {"_id": 0}))
     return render_template('myphotos.html', photos=items,
                            username=session.get('username'))
 
@@ -127,11 +121,11 @@ def register():
         email = request.form['email']
         password = request.form['password']
         # Check if user already exists
-        response = users_table.get_item(Key={'Email': email})
-        if 'Item' in response:
+        existing = users_col.find_one({"Email": email})
+        if existing:
             flash('An account with this email already exists')
             return redirect('/register')
-        users_table.put_item(Item={
+        users_col.insert_one({
             'Email': email,
             'PasswordHash': generate_password_hash(password)
         })
@@ -144,9 +138,9 @@ def login():
     if request.method == 'POST':
         email = request.form['email']
         password = request.form['password']
-        response = users_table.get_item(Key={'Email': email})
-        if 'Item' not in response or not check_password_hash(
-                response['Item']['PasswordHash'], password):
+        user = users_col.find_one({"Email": email})
+        if not user or not check_password_hash(
+                user['PasswordHash'], password):
             flash('Invalid email or password')
             return redirect('/login')
         session['username'] = email
@@ -182,8 +176,7 @@ def add_photo():
                         fromtimestamp(ts).\
                         strftime('%Y-%m-%d %H:%M:%S')
 
-            table.put_item(
-            Item={
+            photos_col.insert_one({
                     "UserID": session['username'],
                     "PhotoID": str(int(ts*1000)),
                     "CreationTime": timestamp,
@@ -202,30 +195,27 @@ def add_photo():
 
 @app.route('/<int:photoID>', methods=['GET'])
 def view_photo(photoID):
-    response = table.scan(
-        FilterExpression=Attr('PhotoID').eq(str(photoID))
-    )
+    item = photos_col.find_one({"PhotoID": str(photoID)}, {"_id": 0})
 
-    items = response['Items']
-    print(items[0])
-    tags=items[0]['Tags'].split(',')
-    exifdata=json.loads(items[0]['ExifData'])
+    print(item)
+    tags=item['Tags'].split(',')
+    exifdata=json.loads(item['ExifData'])
 
     return render_template('photodetail.html', 
-            photo=items[0], tags=tags, exifdata=exifdata)
+            photo=item, tags=tags, exifdata=exifdata)
 
 @app.route('/search', methods=['GET'])
 def search_page():
     query = request.args.get('query', None)    
-    
-    response = table.scan(
-        FilterExpression=Attr('Public').eq('yes')
-    )
-    q = str(query).lower()
-    items = [item for item in response['Items']
-             if q in item.get('Title', '').lower()
-             or q in item.get('Description', '').lower()
-             or q in item.get('Tags', '').lower()]
+    q = str(query)
+    items = list(photos_col.find({
+        "Public": "yes",
+        "$or": [
+            {"Title": {"$regex": q, "$options": "i"}},
+            {"Description": {"$regex": q, "$options": "i"}},
+            {"Tags": {"$regex": q, "$options": "i"}}
+        ]
+    }, {"_id": 0}))
     return render_template('search.html', 
             photos=items, searchquery=query)
 
@@ -234,15 +224,15 @@ def my_search_page():
     if 'username' not in session:
         return redirect('/login')
     query = request.args.get('query', None)
-    
-    response = table.query(
-        KeyConditionExpression=Key('UserID').eq(session['username'])
-    )
-    q = str(query).lower()
-    items = [item for item in response['Items']
-             if q in item.get('Title', '').lower()
-             or q in item.get('Description', '').lower()
-             or q in item.get('Tags', '').lower()]
+    q = str(query)
+    items = list(photos_col.find({
+        "UserID": session['username'],
+        "$or": [
+            {"Title": {"$regex": q, "$options": "i"}},
+            {"Description": {"$regex": q, "$options": "i"}},
+            {"Tags": {"$regex": q, "$options": "i"}}
+        ]
+    }, {"_id": 0}))
     return render_template('myphotos.html', photos=items,
                            username=session.get('username'))
 
