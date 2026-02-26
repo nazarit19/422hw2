@@ -193,13 +193,22 @@ def add_photo():
     else:
         return render_template('form.html')
 
-@app.route('/<int:photoID>', methods=['GET'])
+@app.route('/photo/<photoID>', methods=['GET'])
 def view_photo(photoID):
-    item = photos_col.find_one({"PhotoID": str(photoID)}, {"_id": 0})
+    # Match PhotoID as string or int (legacy data may store as int)
+    item = photos_col.find_one(
+        {"$or": [{"PhotoID": photoID}, {"PhotoID": int(photoID)}]},
+        {"_id": 0}
+    )
 
-    print(item)
+    if not item:
+        abort(404)
+
+    # print(item)
     tags=item['Tags'].split(',')
-    exifdata=json.loads(item['ExifData'])
+    exifdata = item.get('ExifData', {})
+    if isinstance(exifdata, str):
+        exifdata = json.loads(exifdata)
 
     return render_template('photodetail.html', 
             photo=item, tags=tags, exifdata=exifdata)
